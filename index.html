@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Number Guessing Game with Server Leaderboard</title>
+<style>
+body, html {
+  margin:0; padding:0; height:100%;
+  font-family:'Arial',sans-serif;
+  background: linear-gradient(135deg,#6a11cb,#2575fc);
+  display:flex; justify-content:center; align-items:center; color:#fff;
+}
+.game-container {
+  background: rgba(0,0,0,0.8);
+  padding:25px; border-radius:15px;
+  box-shadow:0 4px 15px rgba(0,0,0,0.4);
+  text-align:center; width:95%; max-width:450px;
+}
+h1{margin-bottom:15px; font-size:26px; text-transform:uppercase;}
+p,label{margin-bottom:10px;font-size:16px;}
+select,input[type="number"],input[type="text"]{
+  width:100%; padding:10px; margin-bottom:10px;
+  border:2px solid #6a11cb; border-radius:5px;
+  background:rgba(255,255,255,0.1); color:#fff; font-size:16px; outline:none;
+}
+select:focus,input[type="number"]:focus,input[type="text"]:focus{border-color:#2575fc;}
+button{
+  width:100%; padding:10px; background:#6a11cb; border:none; border-radius:5px;
+  color:#fff; font-size:16px; cursor:pointer; transition:0.3s; margin-bottom:10px;
+}
+button:hover{background:#2575fc; transform:scale(1.05);}
+#message{margin-top:15px; font-size:18px; font-weight:bold;}
+#previousGuesses{margin-top:10px;font-size:14px;color:#ccc;}
+#restartGame{margin-top:10px; background:#ff4444; display:none;}
+#restartGame:hover{background:#cc0000;}
+#timer,#score,#leaderboardTitle{font-size:16px; margin:10px 0;}
+#leaderboard{font-size:14px; text-align:left; background:rgba(255,255,255,0.1); padding:10px; border-radius:8px; max-height:150px; overflow-y:auto;}
+</style>
+</head>
+<body>
+<div class="game-container">
+<h1>Number Guessing Game</h1>
+<label for="difficulty">Choose Difficulty:</label>
+<select id="difficulty">
+  <option value="easy">Easy (15 Attempts)</option>
+  <option value="medium" selected>Medium (10 Attempts)</option>
+  <option value="hard">Hard (5 Attempts)</option>
+</select>
+
+<p>Guess a number between 1 and 100.</p>
+<p>Attempts left: <span id="attempts">10</span></p>
+<p id="timer">Time: 0s</p>
+<p id="score">Score: 0</p>
+
+<input type="text" id="playerName" placeholder="Enter your name">
+<input type="number" id="guessInput" placeholder="Enter your guess" min="1" max="100">
+<button id="submitGuess">Submit Guess</button>
+<button id="restartGame">Restart Game</button>
+
+<p id="message"></p>
+<p id="previousGuesses">Previous guesses: None</p>
+
+<h3 id="leaderboardTitle">🏆 Leaderboard (Top 5)</h3>
+<div id="leaderboard">Loading leaderboard...</div>
+
+<audio id="winSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_67a3d06e9b.mp3?filename=correct-2-46134.mp3"></audio>
+<audio id="loseSound" src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_d5c876cb92.mp3?filename=negative_beeps-6008.mp3"></audio>
+</div>
+
+<script>
+let randomNumber, attemptsLeft, totalAttempts, score=0, time=0, timerInterval;
+let previousGuesses=[];
+
+const guessInput=document.getElementById('guessInput');
+const submitGuess=document.getElementById('submitGuess');
+const message=document.getElementById('message');
+const attemptsDisplay=document.getElementById('attempts');
+const restartGame=document.getElementById('restartGame');
+const previousGuessesDisplay=document.getElementById('previousGuesses');
+const difficultySelect=document.getElementById('difficulty');
+const timerDisplay=document.getElementById('timer');
+const scoreDisplay=document.getElementById('score');
+const playerNameInput=document.getElementById('playerName');
+const leaderboardDiv=document.getElementById('leaderboard');
+const winSound=document.getElementById('winSound');
+const loseSound=document.getElementById('loseSound');
+
+// Backend URL
+const API_URL = "http://localhost:3000/leaderboard";
+
+async function updateLeaderboardDisplay(){
+    try{
+        const res = await fetch(API_URL);
+        const data = await res.json();
+        if(data.length===0){
+            leaderboardDiv.textContent='No scores yet';
+            return;
+        }
+        leaderboardDiv.innerHTML=data.map((entry,i)=>`${i+1}. ${entry.name} - ${entry.score}`).join('<br>');
+    }catch(err){
+        console.log(err);
+        leaderboardDiv.textContent='Failed to load leaderboard';
+    }
+}
+
+async function addScoreToLeaderboard(playerName, score){
+    try{
+        await fetch(API_URL, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({name:playerName, score:score})
+        });
+        updateLeaderboardDisplay();
+    }catch(err){console.log(err);}
+}
+
+function startGame(){
+    randomNumber=Math.floor(Math.random()*100)+1;
+    previousGuesses=[];
+    time=0;
+    clearInterval(timerInterval);
+    timerInterval=setInterval(()=>{time++; timerDisplay.textContent=`Time: ${time}s`;},1000);
+
+    const difficulty=difficultySelect.value;
+    totalAttempts=(difficulty==='easy')?15:(difficulty==='hard')?5:10;
+    attemptsLeft=totalAttempts;
+
+    attemptsDisplay.textContent=attemptsLeft;
+    message.textContent='';
+    previousGuessesDisplay.textContent='Previous guesses: None';
+    guessInput.disabled=false;
+    submitGuess.disabled=false;
+    restartGame.style.display='none';
+    guessInput.value='';
+    guessInput.focus();
+    score=0;
+    scoreDisplay.textContent=`Score: ${score}`;
+}
+
+function checkGuess(){
+    const userGuess=Number(guessInput.value);
+    const playerName=playerNameInput.value.trim()||'Anonymous';
+    if(isNaN(userGuess)||userGuess<1||userGuess>100){
+        message.textContent='Please enter a valid number between 1 and 100.';
+        return;
+    }
+
+    if(!previousGuesses.includes(userGuess)){
+        previousGuesses.push(userGuess);
+        previousGuessesDisplay.textContent='Previous guesses: '+previousGuesses.join(', ');
+    }
+
+    attemptsLeft--;
+    attemptsDisplay.textContent=attemptsLeft;
+
+    if(userGuess===randomNumber){
+        winSound.play();
+        score += (attemptsLeft*10) - Math.floor(time/2);
+        scoreDisplay.textContent=`Score: ${score}`;
+
+        message.textContent=`🎉 Correct! You guessed ${randomNumber} in ${time}s.`;
+
+        addScoreToLeaderboard(playerName, score);
+        endGame();
+    } else if(attemptsLeft===0){
+        loseSound.play();
+        message.textContent=`😢 Game Over! The correct number was ${randomNumber}.`;
+        endGame();
+    } else{
+        message.textContent=userGuess<randomNumber?'📉 Too low!':'📈 Too high!';
+    }
+
+    guessInput.value='';
+    guessInput.focus();
+}
+
+function endGame(){
+    clearInterval(timerInterval);
+    guessInput.disabled=true;
+    submitGuess.disabled=true;
+    restartGame.style.display='block';
+}
+
+// Event Listeners
+submitGuess.addEventListener('click',checkGuess);
+restartGame.addEventListener('click',startGame);
+guessInput.addEventListener('keypress',e=>{if(e.key==='Enter')checkGuess();});
+difficultySelect.addEventListener('change',startGame);
+
+startGame();
+updateLeaderboardDisplay();
+</script>
+</body>
+</html>
